@@ -204,7 +204,10 @@ export function isPaidLicense(license: string): boolean {
 }
 
 export function parseUsers(text: string): { users: UserRow[]; warnings: string[] } {
-  const rows = parseCsv(text);
+  return parseUserRows(parseCsv(text));
+}
+
+export function parseUserRows(rows: string[][]): { users: UserRow[]; warnings: string[] } {
   const warnings: string[] = [];
   if (rows.length < 2) throw new Error("The CSV has no data rows. Check that you exported the user list with a header row.");
   const { map, unmapped } = mapHeaders(rows[0]);
@@ -256,6 +259,61 @@ export function parseUsers(text: string): { users: UserRow[]; warnings: string[]
     );
   }
   return { users, warnings };
+}
+
+// ---------------------------------------------------------------------------
+// Combining exports — e.g. the M365 admin center user list + Entra's MFA report
+// ---------------------------------------------------------------------------
+
+const FIELDS = Object.keys(HEADER_ALIASES) as Field[];
+type MergedRecord = Partial<Record<Field, string>>;
+
+/**
+ * Joins several exports into one table on the email column. The first file sets the
+ * account order; later files fill in the columns it lacks or left blank. The first
+ * non-blank value wins.
+ */
+export function mergeCsvFiles(files: { name: string; text: string }[]): { rows: string[][]; warnings: string[] } {
+  const warnings: string[] = [];
+  const header: MergedRecord = {};
+  const records: MergedRecord[] = [];
+  const byEmail = new Map<string, MergedRecord>();
+  const ignored = new Set<string>();
+  files.forEach(({ name, text }, i) => {
+    const rows = parseCsv(text);
+    if (rows.length < 2) throw new Error(`${name} has no data rows. Check that you exported it with a header row.`);
+    const { map, unmapped } = mapHeaders(rows[0]);
+    if (map.upn === undefined) {
+      throw new Error(`${name} has no email column, so it can't be matched with the other files. Detected headers: ${rows[0].join(", ")}`);
+    }
+    unmapped.forEach((h) => h.trim() && ignored.add(h.trim()));
+    for (const f of FIELDS) if (map[f] !== undefined && header[f] === undefined) header[f] = rows[0][map[f]!];
+    let added = 0;
+    let noEmail = 0;
+    for (const r of rows.slice(1)) {
+      const key = (r[map.upn] ?? "").trim().toLowerCase();
+      if (!key) {
+        noEmail++;
+        continue;
+      }
+      let rec = byEmail.get(key);
+      if (!rec) {
+        rec = {};
+        byEmail.set(key, rec);
+        records.push(rec);
+        if (i > 0) added++;
+      }
+      for (const f of FIELDS) {
+        const v = map[f] !== undefined ? (r[map[f]!] ?? "") : "";
+        if (v.trim() && !(rec[f] ?? "").trim()) rec[f] = v;
+      }
+    }
+    if (noEmail) warnings.push(`Skipped ${noEmail} row${noEmail === 1 ? "" : "s"} in ${name} with no email, since ${noEmail === 1 ? "it" : "they"} can't be matched.`);
+    if (added) warnings.push(`${added} account${added === 1 ? " appears" : "s appear"} only in ${name}, so some of ${added === 1 ? "its" : "their"} columns are blank.`);
+  });
+  if (ignored.size) warnings.push(`Ignored columns: ${[...ignored].join(", ")}`);
+  const fields = FIELDS.filter((f) => header[f] !== undefined);
+  return { rows: [fields.map((f) => header[f]!), ...records.map((rec) => fields.map((f) => rec[f] ?? ""))], warnings };
 }
 
 // ---------------------------------------------------------------------------
@@ -327,4 +385,11 @@ export function auditUsers(users: UserRow[], source: string, warnings: string[] 
 export function auditCsv(text: string, source: string): IdentityAudit {
   const { users, warnings } = parseUsers(text);
   return auditUsers(users, source, warnings);
+}
+
+export function auditCsvFiles(files: { name: string; text: string }[]): IdentityAudit {
+  if (files.length === 1) return auditCsv(files[0].text, files[0].name);
+  const merged = mergeCsvFiles(files);
+  const { users, warnings } = parseUserRows(merged.rows);
+  return auditUsers(users, files.map((f) => f.name).join(" + "), [...warnings, ...merged.warnings]);
 }

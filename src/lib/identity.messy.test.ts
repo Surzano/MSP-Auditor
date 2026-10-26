@@ -5,7 +5,7 @@
  * Fixtures are inline strings so no CSV is ever committed.
  */
 import { describe, expect, it } from "vitest";
-import { auditUsers, detectDelimiter, parseCsv, parseUsers } from "./identity";
+import { auditCsv, auditCsvFiles, auditUsers, detectDelimiter, mergeCsvFiles, parseCsv, parseUserRows, parseUsers } from "./identity";
 
 const NOW = new Date("2026-06-01T12:00:00Z");
 const audit = (csv: string) => {
@@ -171,5 +171,64 @@ describe("Pseudonymized exports", () => {
     expect(b.score).toBe(a.score);
     expect(b.stale).toHaveLength(a.stale.length);
     expect(b.missingMfa).toHaveLength(a.missingMfa.length);
+  });
+});
+
+describe("Combining the admin center export with Entra's MFA report", () => {
+  const users = [
+    "Block credential,Display name,Licenses,Title,User principal name",
+    "False,Ana Ortiz,Microsoft 365 Business Premium,Program Lead,ana@org.org",
+    "False,Ben Lee,Microsoft 365 Business Premium,Director,ben@org.org",
+    "True,Former Staffer,Microsoft 365 Business Standard,,former@org.org",
+  ].join("\r\n");
+  // Header row copied from Authentication methods → User registration details → Download (abridged).
+  const mfa = [
+    "User principal name,User display name,User type,Is admin,Is MFA registered,Is MFA capable,Methods registered",
+    "ANA@ORG.ORG,Ana Ortiz,member,False,True,True,microsoftAuthenticatorPush",
+    "ben@org.org,Ben Lee,member,True,False,False,",
+    "guest_vendor@other.org,Vendor,guest,False,False,False,",
+    ",No Email,member,False,False,False,",
+  ].join("\r\n");
+  const merged = () => {
+    const m = mergeCsvFiles([
+      { name: "users.csv", text: users },
+      { name: "mfa.csv", text: mfa },
+    ]);
+    const { users: rows, warnings } = parseUserRows(m.rows);
+    return auditUsers(rows, "merged", [...warnings, ...m.warnings], NOW);
+  };
+
+  it("matches accounts by email, ignoring case, and fills in MFA and admin", () => {
+    const a = merged();
+    const ana = a.users.find((u) => u.upn === "ana@org.org")!;
+    expect(ana.mfa).toBe(true);
+    expect(ana.title).toBe("Program Lead");
+    const ben = a.users.find((u) => u.upn === "ben@org.org")!;
+    expect(ben.isGlobalAdmin).toBe(true);
+    expect(ben.flags).toContain("ADMIN_NO_MFA");
+    expect(a.users.find((u) => u.upn === "former@org.org")!.enabled).toBe(false);
+  });
+
+  it("no longer says MFA can't be measured, and explains what didn't line up", () => {
+    const w = merged().warnings.join(" ");
+    expect(w).not.toMatch(/No MFA column/);
+    expect(w).toMatch(/1 account appears only in mfa\.csv/);
+    expect(w).toMatch(/Skipped 1 row in mfa\.csv with no email/);
+    expect(w).toMatch(/Ignored columns: Is MFA capable, Methods registered/);
+  });
+
+  it("adds accounts that only the second file knows about", () => {
+    const vendor = merged().users.find((u) => u.upn === "guest_vendor@other.org")!;
+    expect(vendor.accountType).toBe("Guest");
+    expect(merged().totalAccounts).toBe(4);
+  });
+
+  it("refuses a file that has no email column to match on", () => {
+    expect(() => auditCsvFiles([{ name: "users.csv", text: users }, { name: "names.csv", text: "Name,MFA\nAna Ortiz,Yes\n" }])).toThrow(/names\.csv has no email column/);
+  });
+
+  it("treats a single file exactly as before", () => {
+    const one = auditCsvFiles([{ name: "users.csv", text: users }]);
+    expect(one).toEqual(auditCsv(users, "users.csv"));
   });
 });

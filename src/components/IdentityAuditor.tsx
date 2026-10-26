@@ -4,7 +4,7 @@ import { Crown, Download, FileSpreadsheet, FileUp, KeyRound, PiggyBank, Search, 
 import { useMemo, useRef, useState } from "react";
 import { downloadText } from "@/lib/download";
 import { formatUsd } from "@/lib/grading";
-import { STALE_DAYS, auditCsv, type AuditedUser, type FlagCode, type IdentityAudit } from "@/lib/identity";
+import { STALE_DAYS, auditCsvFiles, type AuditedUser, type FlagCode, type IdentityAudit } from "@/lib/identity";
 import { buildBlankTemplateCsv, buildSampleCsv } from "@/lib/sampleData";
 import { Button, Card, EmptyState, GradeBadge, Kpi, SectionTitle, cx } from "./ui";
 
@@ -45,15 +45,16 @@ export function IdentityAuditor({
   const [query, setQuery] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
 
-  async function handleFile(file: File | undefined) {
-    if (!file) return;
+  async function handleFiles(list: FileList | null | undefined) {
+    const files = Array.from(list ?? []);
+    if (!files.length) return;
     setError(null);
-    if (!/\.csv$/i.test(file.name) && file.type !== "text/csv") {
-      setError("Please choose a .csv file exported from Microsoft 365 or Google Workspace.");
+    if (files.some((f) => !/\.csv$/i.test(f.name) && f.type !== "text/csv")) {
+      setError("Please choose .csv files exported from Microsoft 365 or Google Workspace.");
       return;
     }
     try {
-      onAudit(auditCsv(await file.text(), file.name));
+      onAudit(auditCsvFiles(await Promise.all(files.map(async (f) => ({ name: f.name, text: await f.text() })))));
       setFilter("flagged");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not read that CSV.");
@@ -157,7 +158,7 @@ export function IdentityAuditor({
         onDrop={(e) => {
           e.preventDefault();
           setDragging(false);
-          handleFile(e.dataTransfer.files[0]);
+          handleFiles(e.dataTransfer.files);
         }}
         onClick={() => fileInput.current?.click()}
         onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && fileInput.current?.click()}
@@ -169,9 +170,9 @@ export function IdentityAuditor({
         )}
       >
         <FileUp className={cx("h-7 w-7", dragging ? "text-moss-700" : "text-stone-400")} />
-        <div className="text-sm font-medium text-ink-900">Drop a user export (.csv) here, or click to choose one</div>
-        <div className="text-xs text-stone-500">Stays in this tab. Microsoft 365 and Google Workspace column names are recognized automatically.</div>
-        <input ref={fileInput} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => handleFile(e.target.files?.[0] ?? undefined)} />
+        <div className="text-sm font-medium text-ink-900">Drop a user export (.csv) here, or click to choose one or more</div>
+        <div className="text-xs text-stone-500">Stays in this tab. Microsoft 365 and Google Workspace column names are recognized automatically. Several files are matched up by email.</div>
+        <input ref={fileInput} type="file" accept=".csv,text/csv" multiple className="hidden" onChange={(e) => handleFiles(e.target.files)} />
       </div>
       <p className="-mt-3 text-sm text-stone-600">
         Just looking?{" "}
@@ -187,7 +188,7 @@ export function IdentityAuditor({
         <EmptyState icon={<Users className="h-6 w-6" />} title="No user directory loaded yet">
           <b>Google Workspace:</b> Admin console → Directory → Users → Download users. This includes 2-Step Verification and last sign-in.
           <br />
-          <b>Microsoft 365:</b> the standard user download doesn&apos;t include MFA or last sign-in. Use Entra admin center → Protection → Authentication methods → User registration details for MFA, or ask your MSP for one export with MFA status, last sign-in, roles, and licenses (the blank template shows the columns).
+          <b>Microsoft 365:</b> the standard user download doesn&apos;t include MFA or last sign-in. Add it together with Entra admin center → Protection → Authentication methods → User registration details (for MFA) and they&apos;re matched up by email. Or ask your MSP for one export with MFA status, last sign-in, roles, and licenses (the blank template shows the columns).
         </EmptyState>
       ) : (
         <div className="animate-fade-up space-y-6" key={audit.source + audit.totalAccounts}>

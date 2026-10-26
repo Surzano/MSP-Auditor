@@ -15,7 +15,7 @@ Built by **Surzano R. Solomon**.
 ## Does it work?
 
 - **Domain checks:** on 25 well-known nonprofit domains, the live scanner agreed with independent DNS lookups and direct header checks on **153 of 153** comparisons (SPF, DMARC and five security headers). Sites that block automated requests are left ungraded rather than failed. Full results: [`validation/domain-results.md`](validation/domain-results.md).
-- **User exports:** 128 automated tests, including 22 built from the shapes of real Microsoft 365, Entra and Google Workspace exports, Excel re-saves and damaged files.
+- **User exports:** 133 automated tests, including 27 built from the shapes of real Microsoft 365, Entra and Google Workspace exports, Excel re-saves, damaged files, and an admin center export combined with Entra's MFA report.
 - **Answer-key checks:** `npm run validate:tenant` compares the identity audit with a hand-written answer key for a test tenant. See [`validation/README.md`](validation/README.md) to run all three.
 
 ## 1. The Problem: The Nonprofit "MSP Blind Spot"
