@@ -192,7 +192,15 @@ export function IdentityAuditor({
         </EmptyState>
       ) : (
         <div className="animate-fade-up space-y-6" key={audit.source + audit.totalAccounts}>
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-[repeat(4,1fr)_auto]">
+          <Card className="flex items-center gap-5 p-5">
+            <GradeBadge grade={audit.grade} size="lg" score={audit.score} />
+            <div>
+              <div className="text-xs font-semibold tracking-wide text-stone-500 uppercase">Identity grade</div>
+              <p className="mt-1 text-sm text-stone-700">Based on MFA coverage, stale accounts, Global Admins and license waste below.</p>
+            </div>
+          </Card>
+
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <Kpi
               label="MFA coverage"
               value={`${audit.mfaCoveragePct}%`}
@@ -221,12 +229,6 @@ export function IdentityAuditor({
               tone={audit.annualWaste === 0 ? "good" : "ok"}
               icon={<PiggyBank className="h-4 w-4" />}
             />
-            <Card className="flex items-center justify-center p-5 sm:col-span-2 xl:col-span-1">
-              <div className="text-center">
-                <div className="mb-2 text-xs font-semibold tracking-wide text-stone-500 uppercase">Identity grade</div>
-                <GradeBadge grade={audit.grade} size="lg" score={audit.score} />
-              </div>
-            </Card>
           </div>
 
           {audit.adminsWithoutMfa.length > 0 && (
