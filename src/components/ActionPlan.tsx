@@ -7,6 +7,7 @@ import {
   Check,
   ChevronDown,
   Copy,
+  ExternalLink,
   Landmark,
   Lock,
   Mail,
@@ -17,6 +18,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { DBIR, dbirComparison, dbirHeadline, type DbirRow } from "@/lib/dbir";
 import { formatUsd, gradeTone, toneClasses } from "@/lib/grading";
 import { boardRisks, compositeScore, generateTickets, mailtoHref, quickWins, type AuditContext, type BoardRisk, type Ticket } from "@/lib/reports";
 import type { OrgProfile } from "@/lib/sampleData";
@@ -69,6 +71,7 @@ export function ActionPlan({ ctx, onOrgChange, view: sub, onViewChange: setSub }
 
       {sub === "tickets" ? (
         <div className="space-y-5 print:hidden">
+          {composite.score !== null && <DbirPanel ctx={ctx} />}
           {tickets.map((t) => (
             <TicketCard key={t.id} t={t} mspEmail={ctx.org.mspEmail} />
           ))}
@@ -90,7 +93,10 @@ function OrgEditor({ org, onChange }: { org: OrgProfile; onChange: (o: OrgProfil
       <span className="text-[11px] font-semibold tracking-wide text-stone-500 uppercase">{label}</span>
       <input
         type={type}
-        value={org[key]}
+        // Show an empty box instead of 0 so typing replaces it rather than producing "05".
+        value={type === "number" && !org[key] ? "" : org[key]}
+        placeholder={type === "number" ? "0" : undefined}
+        min={type === "number" ? 0 : undefined}
         onChange={(e) => onChange({ ...org, [key]: type === "number" ? Number(e.target.value) : e.target.value })}
         className="rounded border border-stone-300 px-3 py-2 text-sm outline-none focus:border-moss-500 focus:ring-4 focus:ring-moss-500/15"
       />
@@ -185,6 +191,80 @@ function TicketCard({ t, mspEmail }: { t: Ticket; mspEmail: string }) {
   );
 }
 
+const DBIR_STATUS: Record<DbirRow["status"], { label: string; cls: string }> = {
+  exposed: { label: "Open", cls: "bg-brick-600 text-white" },
+  partial: { label: "Partial", cls: "bg-ochre-400 text-ink-950" },
+  covered: { label: "Covered", cls: "bg-moss-600 text-white" },
+  unknown: { label: "Not checked", cls: "bg-stone-200 text-stone-600" },
+};
+
+function DbirRows({ rows, compact }: { rows: DbirRow[]; compact?: boolean }) {
+  return (
+    <ul className="divide-y divide-stone-100 rounded-md border border-stone-200">
+      {rows.map((r) => (
+        <li key={r.key} className={cx("print-avoid-break grid items-start gap-x-4 gap-y-1 sm:grid-cols-[4.5rem_1fr_1fr_auto]", compact ? "px-3 py-2" : "px-4 py-3")}>
+          <div className={cx("font-serif leading-none font-semibold text-ink-950 tabular-nums", compact ? "text-2xl" : "text-3xl")}>{r.stat}</div>
+          <div className={cx("leading-snug text-stone-600", compact ? "text-[11.5px]" : "text-sm")}>{r.fact}</div>
+          <div className={cx("leading-snug font-semibold text-stone-800", compact ? "text-[11.5px]" : "text-sm")}>
+            <span className="font-normal text-stone-500">Our result: </span>
+            {r.finding}
+          </div>
+          <span className={cx("justify-self-start rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide whitespace-nowrap uppercase sm:justify-self-end", DBIR_STATUS[r.status].cls)}>{DBIR_STATUS[r.status].label}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function DbirSource({ className }: { className?: string }) {
+  return (
+    <p className={cx("text-[11px] text-stone-500", className)}>
+      Source:{" "}
+      <a href={DBIR.url} target="_blank" rel="noreferrer" className="underline decoration-stone-300 underline-offset-2 hover:text-stone-700">
+        {DBIR.edition}
+      </a>{" "}
+      ({DBIR.period}).
+    </p>
+  );
+}
+
+/** Tickets view: why these tickets matter now, and what to do next. */
+function DbirPanel({ ctx }: { ctx: AuditContext }) {
+  const rows = dbirComparison(ctx);
+  const open = rows.filter((r) => r.status === "exposed" || r.status === "partial").length;
+  return (
+    <Card className="overflow-hidden">
+      <div className="border-b border-stone-100 bg-stone-50 px-5 py-4">
+        <div className="flex items-center gap-2 text-[11px] font-bold tracking-[0.18em] text-brick-700 uppercase">
+          <AlertOctagon className="h-4 w-4" /> Why this can&apos;t wait
+        </div>
+        <h3 className="mt-1 font-serif text-xl font-semibold text-ink-950">Your results next to how real breaches happened</h3>
+        <p className="mt-1 text-sm text-stone-600">{dbirHeadline(rows, "tickets")}</p>
+      </div>
+      <div className="space-y-3 p-5">
+        <DbirRows rows={rows} />
+        <DbirSource />
+        {open > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-ink-900 px-5 py-4 text-white">
+            <div>
+              <div className="font-semibold">Send these tickets to {ctx.org.mspName} this week.</div>
+              <div className="text-sm text-stone-300">Ask for written confirmation of each fix within 30 days, then re-run this audit to prove it.</div>
+            </div>
+            <a
+              href={DBIR.url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-semibold text-moss-300 ring-1 ring-moss-300/40 ring-inset hover:bg-white/5"
+            >
+              Read the report <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 const LEVEL_CLS: Record<BoardRisk["level"], string> = {
   High: "bg-brick-600 text-white",
   Elevated: "bg-ochre-400 text-ink-950",
@@ -195,17 +275,23 @@ const LEVEL_CLS: Record<BoardRisk["level"], string> = {
 function BoardOnePager({ ctx, composite }: { ctx: AuditContext; composite: ReturnType<typeof compositeScore> }) {
   const risks = boardRisks(ctx);
   const wins = quickWins(ctx);
+  const dbir = dbirComparison(ctx);
   const tone = toneClasses[gradeTone(composite.grade)];
   const savings = ctx.identity?.annualWaste ?? 0;
   const highCount = risks.filter((r) => r.level === "High").length;
   const date = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 
+  const org = ctx.org.orgName;
+  const possessive = /s$/i.test(org) ? `${org}'` : `${org}'s`;
+  const msp = ctx.org.mspName || "our MSP";
+  const areas = highCount === 0 ? "several risk areas need" : highCount === 1 ? "one risk area needs" : `${["two", "three"][highCount - 2] ?? highCount} risk areas need`;
+
   const bottomLine =
     composite.score! >= 90
-      ? `${ctx.org.orgName}'s core cyber protections are in good shape. The priority is keeping them verified as staff, vendors and systems change.`
+      ? `${possessive} core cyber protections are in good shape. The priority now is keeping them verified as staff, vendors and systems change.`
       : composite.score! >= 70
-        ? `${ctx.org.orgName} has a reasonable foundation, but ${highCount || "several"} risk area${highCount === 1 ? "" : "s"} need${highCount === 1 ? "s" : ""} attention. Most fixes are configuration changes our MSP can make within 30 days at little or no cost.`
-        : `${ctx.org.orgName} is exposed to preventable fraud and ransomware risks that our MSP contract does not currently cover. The good news: most fixes are low-cost configuration changes that can be completed within 30 days.`;
+        ? `${org} has a reasonable foundation, but ${areas} attention. Most fixes are configuration changes that ${msp} can make within 30 days at little or no cost.`
+        : `${org} faces preventable fraud and ransomware risks that ${msp} has not confirmed it protects against. The good news is that most fixes are low-cost configuration changes that can be completed within 30 days.`;
 
   return (
     <article id="board-one-pager" className="animate-fade-up mx-auto max-w-[8.5in] rounded-md border border-stone-200 bg-paper p-8 sm:p-10">
@@ -278,6 +364,17 @@ function BoardOnePager({ ctx, composite }: { ctx: AuditContext; composite: Retur
         </div>
       </section>
 
+      <section className="mt-7">
+        <h2 className="flex items-center gap-2 text-sm font-bold tracking-wide text-ink-900 uppercase">
+          <TrendingUp className="h-4 w-4 text-brick-600" /> How we compare to the {DBIR.short}
+        </h2>
+        <p className="mt-1 text-xs text-stone-600">{dbirHeadline(dbir, "board")}</p>
+        <div className="mt-3">
+          <DbirRows rows={dbir} compact />
+        </div>
+        <DbirSource className="mt-1.5" />
+      </section>
+
       <section className="print-avoid-break mt-7 grid gap-5 sm:grid-cols-[1fr_220px]">
         <div>
           <h2 className="flex items-center gap-2 text-sm font-bold tracking-wide text-ink-900 uppercase">
@@ -310,7 +407,7 @@ function BoardOnePager({ ctx, composite }: { ctx: AuditContext; composite: Retur
               <TrendingUp className="h-4 w-4" /> What we ask of the board
             </div>
             <ul className="mt-2 space-y-1.5 text-xs text-stone-700">
-              <li>1. Direct staff to send the 3 attached tickets to {ctx.org.mspName}.</li>
+              <li>1. Direct staff to send the 3 attached tickets to {ctx.org.mspName} this week.</li>
               <li>2. Require written MSP confirmation within 30 days.</li>
               <li>3. Re-run this audit before the next board meeting.</li>
             </ul>
